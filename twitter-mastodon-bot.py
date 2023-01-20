@@ -65,10 +65,11 @@ class MyMastodon:
     def __init__(self, config):
         print('Starting Mastodon class')
         self.api = Mastodon(
-            access_token = config['mastodon-clisec'],
+            access_token = config['mastodon-acctksec'],
             api_base_url = config['mastodon-instance']
         )
         print('Authenticated at Mastodon')
+        print("About me:", self.api.me())
 
 class Bot:
     '''
@@ -79,7 +80,7 @@ class Bot:
         self.parseArguments()
         self.readConfiguration()
         self.tw = MyTwitter(self.config)
-        self.toot = MyMastodon(self.config)
+        self.mst = MyMastodon(self.config)
         self.db = DataBase()
 
     def parseArguments(self):
@@ -98,7 +99,7 @@ class Bot:
         self.config['twitter-conssec'] = cfg.get('TWITTER', 'consumer_secret')
         self.config['twitter-acctkkey'] = cfg.get('TWITTER', 'access_token_key')
         self.config['twitter-acctksec'] = cfg.get('TWITTER', 'access_token_secret')
-        self.config['mastodon-clisec'] = cfg.get('MASTODON', 'client_secret')
+        self.config['mastodon-acctksec'] = cfg.get('MASTODON', 'access_token')
         self.config['mastodon-instance'] = cfg.get('MASTODON', 'instance')
         self.config['twitter-accounts'] = cfg.get('TWITTER', 'accounts').split(",")
         print('configuration:', prettyPrintJSON(self.config))
@@ -114,7 +115,7 @@ class Bot:
                 # Status(ID=1616424976193622023, ScreenName=GloboNews, Created=Fri Jan 20 13:18:40 +0000 2023, Text='Presidente Lula vai se reunir com comandantes das Forças Armadas, nesta sexta (20). Encontro mira fim da crise com… https://t.co/SAakcoHt7S')
                 for msg in resp:
                     #print('msg:', msg)
-                    #print(dir(msg))
+                    print(dir(msg))
                     last_id = self.db.getLastID(account)
                     if last_id > msg.id:
                         continue
@@ -124,7 +125,9 @@ class Bot:
                     print('Text:', msg.text)
                     print('Full Text:', msg.full_text)
                     print('Media:', msg.media)
-                    self.db.updateLastID(account, msg.id)
+                    print(msg.AsJsonString())
+                    self.mst.api.status_post(msg.text)
+                    self.db.updateLastID(account, last_id)
                     print('###################################')
             break
             time.sleep(3)

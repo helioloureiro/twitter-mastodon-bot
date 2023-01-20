@@ -6,9 +6,41 @@ import configparser
 import json
 from mastodon import Mastodon
 import twitter
+import sqlite3
+
+DB_FILE = "twitter-mastodon-bot.db"
 
 def prettyPrintJSON(some_dic):
     print(json.dumps(some_dic, indent=4))
+
+
+class DataBase:
+    def __init__(self):
+        self.dbconn = sqlite3.connect(DB_FILE)
+        self.cursor = self.dbconn.cursor()
+        self.initialize()
+
+    def initialize(self):
+        try:
+            self.createDB()
+        except sqlite3.OperationalError:
+            pass
+
+    def createDB(self):
+        self.cursor.execute('CREATE TABLE twitter(account, last_id)')
+
+    def getLastID(self, account):
+        self.cursor.execute(f'SELECT last_id from twitter WHERE account=\'{account}\'')
+        result = self.cursor.fetchone()
+        if result is None:
+            self.cursor.execute(f'INSERT INTO twitter VALUES (\'{account}\', \'0\')')
+            self.dbconn.commit()
+            return 0
+        return int(result[0])
+
+    def updateLastID(self, account, last_id):
+        self.cursor.execute(f'UPDATE twitter SET last_id=\'{last_id}\' WHERE account=\'{account}\'')
+        self.dbconn.commit()
 
 class MyTwitter:
     '''
@@ -48,6 +80,7 @@ class Bot:
         self.readConfiguration()
         self.tw = MyTwitter(self.config)
         self.toot = MyMastodon(self.config)
+        self.db = DataBase()
 
     def parseArguments(self):
         parser = argparse.ArgumentParser('Twitter to Mastodon bridge bot')
@@ -82,12 +115,16 @@ class Bot:
                 for msg in resp:
                     #print('msg:', msg)
                     #print(dir(msg))
+                    last_id = self.db.getLastID(account)
+                    if last_id > msg.id:
+                        continue
                     print('ID:', msg.id)
                     print('ScreenName:', msg.user)
                     print('Created:', msg.created_at)
                     print('Text:', msg.text)
                     print('Full Text:', msg.full_text)
                     print('Media:', msg.media)
+                    self.db.updateLastID(account, msg.id)
                     print('###################################')
             break
             time.sleep(3)

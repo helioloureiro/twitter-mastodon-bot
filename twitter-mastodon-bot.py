@@ -9,7 +9,10 @@ import twitter
 import sqlite3
 import re
 import requests
+import asyncio
+import queue
 
+post_queue = queue.Queue()
 DB_FILE = "twitter-mastodon-bot.db"
 
 def prettyPrintJSON(some_dic):
@@ -61,6 +64,11 @@ class MyTwitter:
         )
         print('Authenticated at twitter.')
 
+    def GetUserTimeline(self, **kwargs):
+        '''
+        Simple warpper for GetUserTimeline.
+        '''
+        return self.api.GetUserTimeline(**kwargs)
 
 class MyMastodon:
     '''
@@ -74,6 +82,12 @@ class MyMastodon:
         )
         print('Authenticated at Mastodon')
         print("About me:", self.api.me())
+
+    def status_post(self, **kwargs):
+        '''
+        Simple wrapper for status_post.
+        '''
+        return self.api.status_post(**kwargs)
 
 class Bot:
     '''
@@ -125,7 +139,7 @@ class Bot:
             print('keep running')
             for account in self.config['twitter-accounts']:
                 print('* checking:', account)
-                resp = self.tw.api.GetUserTimeline(screen_name=account)
+                resp = self.tw.GetUserTimeline(screen_name=account)
                 print('raw:', resp)
                 # Status(ID=1616424976193622023, ScreenName=GloboNews, Created=Fri Jan 20 13:18:40 +0000 2023, Text='Presidente Lula vai se reunir com comandantes das Forças Armadas, nesta sexta (20). Encontro mira fim da crise com… https://t.co/SAakcoHt7S')
                 for msg in resp:
@@ -158,7 +172,7 @@ class Bot:
                     full_text = '⚠️ Apenas um teste: ⚠️\n' + full_text
                     full_text += "\n🏁fim do teste🏁\n"
                     print(msg.AsJsonString())
-                    self.mst.api.status_post(full_text)
+                    self.mst.status_post(status=full_text)
                     self.db.updateLastID(account, msg.id)
                     print('###################################')
             break

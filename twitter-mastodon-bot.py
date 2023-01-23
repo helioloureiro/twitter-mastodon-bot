@@ -14,6 +14,7 @@ import queue
 
 post_queue = queue.Queue()
 DB_FILE = "twitter-mastodon-bot.db"
+SLEEPTIME = 3 # minutes
 
 def prettyPrintJSON(some_dic):
     print(json.dumps(some_dic, indent=4))
@@ -134,49 +135,58 @@ class Bot:
         print('configuration:', prettyPrintJSON(self.config))
 
 
-    def mainloop(self):
+    async def loop_twitter(self):
         while True:
-            print('keep running')
-            for account in self.config['twitter-accounts']:
-                print('* checking:', account)
-                resp = self.tw.GetUserTimeline(screen_name=account)
-                print('raw:', resp)
-                # Status(ID=1616424976193622023, ScreenName=GloboNews, Created=Fri Jan 20 13:18:40 +0000 2023, Text='Presidente Lula vai se reunir com comandantes das Forças Armadas, nesta sexta (20). Encontro mira fim da crise com… https://t.co/SAakcoHt7S')
-                for msg in resp:
-                    #print('msg:', msg)
-                    print(dir(msg))
-                    last_id = self.db.getLastID(account)
-                    if last_id > msg.id:
-                        continue
-                    print('ID:', msg.id)
-                    print('ScreenName:', msg.user)
-                    print('Created:', msg.created_at)
-                    print('Text:', msg.text)
-                    print('Full Text:', msg.full_text)
-                    print('Media:', msg.media)
-                    if msg.full_text:
-                        full_text = msg.full_text
-                    else:
-                        full_text = msg.text
-                    for entry in msg.urls:
-                        print(" * Entry:", entry)
-                        print(' * URL:', entry.url)
-                        print(' * Expanded URL:', entry.expanded_url)
-                        full_text = re.sub(entry.url, entry.expanded_url, full_text)
-                    # if last character isn't new line, add it:
-                    if full_text[-1] != '\n':
-                        full_text += '\n'
-                    # add hashtags
-                    full_text += '\n'.join(self.config['hashtags'])
-                    # inform about tests at this moment - to be removed later
-                    full_text = '⚠️ Apenas um teste: ⚠️\n' + full_text
-                    full_text += "\n🏁fim do teste🏁\n"
-                    print(msg.AsJsonString())
-                    self.mst.status_post(status=full_text)
-                    self.db.updateLastID(account, msg.id)
-                    print('###################################')
-            break
-            time.sleep(3)
+            for account in  self.config['twitter-accounts']:
+                    print('* checking:', account)
+                    resp = self.tw.GetUserTimeline(screen_name=account)
+                    print('raw:', resp)
+                    for msg in resp:
+                        print('msg:', msg)
+                        last_id = self.db.getLastID(account)
+                        if last_id > msg.id:
+                            continue
+                        print('ID:', msg.id)
+                        print('ScreenName:', msg.user)
+                        print('Created:', msg.created_at)
+                        print('Text:', msg.text)
+                        print('Full Text:', msg.full_text)
+                        print('Media:', msg.media)
+                        if msg.full_text:
+                            full_text = msg.full_text
+                        else:
+                            full_text = msg.text
+                        for entry in msg.urls:
+                            print(" * Entry:", entry)
+                            print(' * URL:', entry.url)
+                            print(' * Expanded URL:', entry.expanded_url)
+                            full_text = re.sub(entry.url, entry.expanded_url, full_text)
+                        # if last character isn't new line, add it:
+                        if full_text[-1] != '\n':
+                            full_text += '\n'
+                        # add hashtags
+                        full_text += '\n'.join(self.config['hashtags'])
+                        # inform about tests at this moment - to be removed later
+                        full_text = '⚠️ Apenas um teste: ⚠️\n' + full_text
+                        full_text += "\n🏁fim do teste🏁\n"
+                        post_queue.put({
+                            "account": account,
+                            "id": msg.id,
+                            "text": full_text
+                        })
+            time.sleep(SLEEPTIME * 60)
+
+    async def loop_mastodon(self):
+        while True:
+            if post_queue.qsize() > 0:
+                for obj in post_queue.get():
+                    self.mst.status_post(status=obj["text"])
+                    self.db.updateLastID(obj["account"], obj["id"])
+            time.sleep(SLEEPTIME * 60)
+
+    def mainloop(self):
+        asyncio.run(self.loop_twitter())
+        asyncio.run(self.loop_mastodon())
 
     def urlDestination(self, url):
         req = requests.get(url)

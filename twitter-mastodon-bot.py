@@ -7,6 +7,8 @@ import json
 from mastodon import Mastodon
 import twitter
 import sqlite3
+import re
+import requests
 
 DB_FILE = "twitter-mastodon-bot.db"
 
@@ -53,7 +55,8 @@ class MyTwitter:
             consumer_key = config['twitter-conskey'],
             consumer_secret = config['twitter-conssec'],
             access_token_key = config['twitter-acctkkey'],
-            access_token_secret = config['twitter-acctksec']
+            access_token_secret = config['twitter-acctksec'],
+            tweet_mode = "extended"
         )
         print('Authenticated at twitter.')
 
@@ -125,12 +128,29 @@ class Bot:
                     print('Text:', msg.text)
                     print('Full Text:', msg.full_text)
                     print('Media:', msg.media)
+                    if msg.full_text:
+                        full_text = msg.full_text
+                    else:
+                        full_text = msg.text
+                    for entry in msg.urls:
+                        print(" * Entry:", entry)
+                        print(' * URL:', entry.url)
+                        print(' * Expanded URL:', entry.expanded_url)
+                        full_text = re.sub(entry.url, entry.expanded_url, full_text)
+
                     print(msg.AsJsonString())
-                    self.mst.api.status_post(msg.text)
+                    self.mst.api.status_post(full_text)
                     self.db.updateLastID(account, last_id)
                     print('###################################')
             break
             time.sleep(3)
+
+    def urlDestination(self, url):
+        req = requests.get(url)
+        if req.status_code != 200:
+            return self.urlDestination(req.url)
+        return self.urlDestination(req.url)
+
 if __name__ == '__main__':
     bot = Bot()
     try:

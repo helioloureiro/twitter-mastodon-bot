@@ -41,6 +41,7 @@ class DataBase:
         return int(result[0])
 
     def updateLastID(self, account, last_id):
+        print(f'DB: Updating {account} to: {last_id}')
         self.cursor.execute(f'UPDATE twitter SET last_id=\'{last_id}\' WHERE account=\'{account}\'')
         self.dbconn.commit()
 
@@ -98,13 +99,24 @@ class Bot:
     def readConfiguration(self):
         cfg = configparser.ConfigParser()
         cfg.read(self.config['filename'])
+        # authentication
         self.config['twitter-conskey'] = cfg.get('TWITTER', 'consumer_key')
         self.config['twitter-conssec'] = cfg.get('TWITTER', 'consumer_secret')
         self.config['twitter-acctkkey'] = cfg.get('TWITTER', 'access_token_key')
         self.config['twitter-acctksec'] = cfg.get('TWITTER', 'access_token_secret')
         self.config['mastodon-acctksec'] = cfg.get('MASTODON', 'access_token')
         self.config['mastodon-instance'] = cfg.get('MASTODON', 'instance')
+        # extra
         self.config['twitter-accounts'] = cfg.get('TWITTER', 'accounts').split(",")
+        self.config['hashtags'] = []
+        try:
+            all_hashtags = cfg.get('MASTODON', 'hashtags')
+            for hashtag in all_hashtags.split(","):
+                # remove spaces
+                hashtag = re.sub(" ", "", hashtag)
+                self.config['hashtags'].append(f'#{hashtag}')
+        except configparser.NoOptionError:
+            pass
         print('configuration:', prettyPrintJSON(self.config))
 
 
@@ -137,10 +149,17 @@ class Bot:
                         print(' * URL:', entry.url)
                         print(' * Expanded URL:', entry.expanded_url)
                         full_text = re.sub(entry.url, entry.expanded_url, full_text)
-
+                    # if last character isn't new line, add it:
+                    if full_text[-1] != '\n':
+                        full_text += '\n'
+                    # add hashtags
+                    full_text += '\n'.join(self.config['hashtags'])
+                    # inform about tests at this moment - to be removed later
+                    full_text = '⚠️ Apenas um teste: ⚠️\n' + full_text
+                    full_text += "\n🏁fim do teste🏁\n"
                     print(msg.AsJsonString())
                     self.mst.api.status_post(full_text)
-                    self.db.updateLastID(account, last_id)
+                    self.db.updateLastID(account, msg.id)
                     print('###################################')
             break
             time.sleep(3)

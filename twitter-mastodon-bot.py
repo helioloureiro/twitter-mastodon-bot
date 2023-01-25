@@ -11,14 +11,22 @@ import re
 import requests
 import asyncio
 import queue
+import logging
+import random
 
-post_queue = queue.Queue()
+post_queue = queue.Queue(10)
 DB_FILE = "twitter-mastodon-bot.db"
-SLEEPTIME = 3 # minutes
+SLEEPTIME = 0.5 # minutes
 
-def prettyPrintJSON(some_dic):
-    print(json.dumps(some_dic, indent=4))
+logging.basicConfig()
+logging.root.setLevel(logging.INFO)
+logging.basicConfig(level=logging.INFO)
 
+logger = logging.getLogger(__name__)
+logger.setLevel('INFO')
+
+def prettyJSON(some_dic):
+    return json.dumps(some_dic, sort_keys=True, indent=4)
 
 class DataBase:
     def __init__(self):
@@ -45,7 +53,7 @@ class DataBase:
         return int(result[0])
 
     def updateLastID(self, account, last_id):
-        print(f'DB: Updating {account} to: {last_id}')
+        logger.debug(f'DB: Updating {account} to: {last_id}')
         self.cursor.execute(f'UPDATE twitter SET last_id=\'{last_id}\' WHERE account=\'{account}\'')
         self.dbconn.commit()
 
@@ -55,7 +63,7 @@ class MyTwitter:
     Single account to login, but multiple accounts to monitor
     '''
     def __init__(self, config):
-        print('Starting Twitter class')
+        logger.debug('Starting Twitter class')
         self.api = twitter.Api(
             consumer_key = config['twitter-conskey'],
             consumer_secret = config['twitter-conssec'],
@@ -63,7 +71,7 @@ class MyTwitter:
             access_token_secret = config['twitter-acctksec'],
             tweet_mode = "extended"
         )
-        print('Authenticated at twitter.')
+        logger.info('Authenticated at twitter.')
 
     def GetUserTimeline(self, **kwargs):
         '''
@@ -76,13 +84,13 @@ class MyMastodon:
     Interfaces with Mastodon account (single one).
     '''
     def __init__(self, config):
-        print('Starting Mastodon class')
+        logger.debug('Starting Mastodon class')
         self.api = Mastodon(
             access_token = config['mastodon-acctksec'],
             api_base_url = config['mastodon-instance']
         )
-        print('Authenticated at Mastodon')
-        print("About me:", self.api.me())
+        logger.info('Authenticated at Mastodon')
+        logger.debug("About me:", self.api.me())
 
     def status_post(self, **kwargs):
         '''
@@ -95,7 +103,7 @@ class Bot:
     Start and control bot.
     '''
     def __init__(self):
-        print('Starting Bot class')
+        logger.debug('Starting Bot class')
         self.parseArguments()
         self.readConfiguration()
         self.tw = MyTwitter(self.config)
@@ -105,13 +113,18 @@ class Bot:
     def parseArguments(self):
         parser = argparse.ArgumentParser('Twitter to Mastodon bridge bot')
         parser.add_argument('--config', help='Configuration file')
+        parser.add_argument('--loglevel', help='Logging level (default: INFO)')
 
         args = parser.parse_args()
         if args.config is None:
             raise Exception('Missing parameter --config')
-        self.config = {'filename': args.config}
+        self.config = {'filename' : args.config}
+        if args.loglevel:
+            logger.setLevel(args.loglevel.upper())
+            logger.debug('logging level set to: ' + args.loglevel.upper())
 
     def readConfiguration(self):
+        logger.info("Reading configuration")
         cfg = configparser.ConfigParser()
         cfg.read(self.config['filename'])
         # authentication
@@ -132,34 +145,38 @@ class Bot:
                 self.config['hashtags'].append(f'#{hashtag}')
         except configparser.NoOptionError:
             pass
-        print('configuration:', prettyPrintJSON(self.config))
-
+        result = prettyJSON(self.config)
+        logger.debug('configuration: ' + result)
 
     async def loop_twitter(self):
         while True:
+            logger.debug("inside twitter loop")
+            logger.debug(f"twitter queue size {post_queue.qsize()}")
             for account in  self.config['twitter-accounts']:
-                    print('* checking:', account)
+                    logger.debug(f'checking: {account}')
                     resp = self.tw.GetUserTimeline(screen_name=account)
-                    print('raw:', resp)
+                    # logger.debug('raw:', resp)
+                    logger.info(f"Found {len(resp)} new tweets for {account}")
                     for msg in resp:
-                        print('msg:', msg)
+                        logger.debug(f'twitter msg: {msg}')
                         last_id = self.db.getLastID(account)
                         if last_id > msg.id:
+                            logger.debug(f'{msg.id} already posted')
                             continue
-                        print('ID:', msg.id)
-                        print('ScreenName:', msg.user)
-                        print('Created:', msg.created_at)
-                        print('Text:', msg.text)
-                        print('Full Text:', msg.full_text)
-                        print('Media:', msg.media)
+                        logger.debug(f'ID: {msg.id}')
+                        logger.debug(f'ScreenName: {msg.user}')
+                        logger.debug(f'Created: {msg.created_at}')
+                        logger.debug(f'Text: {msg.text}')
+                        logger.debug(f'Full Text: {msg.full_text}')
+                        logger.debug(f'Media: {msg.media}')
                         if msg.full_text:
                             full_text = msg.full_text
                         else:
                             full_text = msg.text
                         for entry in msg.urls:
-                            print(" * Entry:", entry)
-                            print(' * URL:', entry.url)
-                            print(' * Expanded URL:', entry.expanded_url)
+                            logger.debug(f"Full URL entry: {entry}")
+                            logger.debug(f'URL: {entry.url}')
+                            logger.debug(f'Expanded URL: {entry.expanded_url}')
                             full_text = re.sub(entry.url, entry.expanded_url, full_text)
                         # if last character isn't new line, add it:
                         if full_text[-1] != '\n':
@@ -167,26 +184,65 @@ class Bot:
                         # add hashtags
                         full_text += '\n'.join(self.config['hashtags'])
                         # inform about tests at this moment - to be removed later
-                        full_text = '⚠️ Apenas um teste: ⚠️\n' + full_text
-                        full_text += "\n🏁fim do teste🏁\n"
+                        full_text = '⚠️ Apenas um teste: ⚠️\n\n' + full_text
+                        logger.debug(f"adding {msg.id} into queue for {account}")
                         post_queue.put({
                             "account": account,
                             "id": msg.id,
                             "text": full_text
                         })
-            time.sleep(SLEEPTIME * 60)
+                        logger.debug(f'queue size at twitter loop: {post_queue.qsize()}')
+            await asyncio.sleep(SLEEPTIME * 60)
+            logger.debug('restarting twitter loop')
 
     async def loop_mastodon(self):
+        # start delayed
+        await asyncio.sleep(10)
         while True:
+            logger.debug("inside mastodon loop")
+            logger.debug(f"mastodon queue size {post_queue.qsize()}")
             if post_queue.qsize() > 0:
-                for obj in post_queue.get():
+                logger.debug(f"queue size at mastodon loop: {post_queue.qsize()}")
+                while post_queue.qsize():
+                    obj = post_queue.get()
+                    logger.debug(f"queue data: {obj}")
                     self.mst.status_post(status=obj["text"])
                     self.db.updateLastID(obj["account"], obj["id"])
-            time.sleep(SLEEPTIME * 60)
+                post_queue.task_done()
+            await asyncio.sleep(SLEEPTIME * 60)
+            logger.debug('restarting mastodon loop')
 
-    def mainloop(self):
-        asyncio.run(self.loop_twitter())
-        asyncio.run(self.loop_mastodon())
+    async def simple_loop_twitter(self):
+        logger.debug('Started simple loop twitter')
+        print('Started simple loop twitter')
+        counter = 0
+        await asyncio.sleep(10)
+        while True:
+            logger.debug(f'twitter queue size: {post_queue.qsize()}')
+            print(f'twitter queue size: {post_queue.qsize()}')
+            post_queue.put_nowait({'size': counter})
+            counter += 1
+            await asyncio.sleep(random.randint(0,10))
+
+    async def simple_loop_mastodon(self):
+        logger.debug('Started simple loop mastodon')
+        print('Started simple loop mastodon')
+        while True:
+            logger.debug(f'mastodon queue size: {post_queue.qsize()}')
+            print(f'mastodon queue size: {post_queue.qsize()}')
+            while post_queue.qsize() > 0:
+                data = post_queue.get_nowait()
+                logger.debug(f'* mastodon data got: {data}')
+                print(f'* mastodon data got: {data}')
+            await asyncio.sleep(random.randint(0, 10))
+        await asyncio.sleep(3)
+
+    async def mainloop(self):
+        logger.info("starting mainloop - waiting for news")
+        async with asyncio.TaskGroup() as tg:
+            task1 = tg.create_task(self.simple_loop_mastodon())
+            task2 = tg.create_task(self.simple_loop_twitter())
+        logger.info("ending processing messages")
 
     def urlDestination(self, url):
         req = requests.get(url)
@@ -197,6 +253,6 @@ class Bot:
 if __name__ == '__main__':
     bot = Bot()
     try:
-        bot.mainloop()
+        asyncio.run(bot.mainloop())
     except KeyboardInterrupt:
-        print('Stopping application')
+        logger.warning('Stopping application')

@@ -151,32 +151,46 @@ class Bot:
     async def loop_twitter(self):
         while True:
             logger.debug("inside twitter loop")
+            print("inside twitter loop")
             logger.debug(f"twitter queue size {post_queue.qsize()}")
+            print(f"twitter queue size {post_queue.qsize()}")
             for account in  self.config['twitter-accounts']:
                     logger.debug(f'checking: {account}')
+                    print(f'checking: {account}')
                     resp = self.tw.GetUserTimeline(screen_name=account)
                     # logger.debug('raw:', resp)
                     logger.info(f"Found {len(resp)} new tweets for {account}")
+                    print(f"Found {len(resp)} new tweets for {account}")
                     for msg in resp:
                         logger.debug(f'twitter msg: {msg}')
+                        print(f'twitter msg: {msg}')
                         last_id = self.db.getLastID(account)
                         if last_id > msg.id:
                             logger.debug(f'{msg.id} already posted')
                             continue
                         logger.debug(f'ID: {msg.id}')
+                        print(f'ID: {msg.id}')
                         logger.debug(f'ScreenName: {msg.user}')
+                        print(f'ScreenName: {msg.user}')
                         logger.debug(f'Created: {msg.created_at}')
+                        print(f'Created: {msg.created_at}')
                         logger.debug(f'Text: {msg.text}')
+                        print(f'Text: {msg.text}')
                         logger.debug(f'Full Text: {msg.full_text}')
+                        print(f'Full Text: {msg.full_text}')
                         logger.debug(f'Media: {msg.media}')
+                        print(f'Media: {msg.media}')
                         if msg.full_text:
                             full_text = msg.full_text
                         else:
                             full_text = msg.text
                         for entry in msg.urls:
                             logger.debug(f"Full URL entry: {entry}")
+                            print(f"Full URL entry: {entry}")
                             logger.debug(f'URL: {entry.url}')
+                            print(f'URL: {entry.url}')
                             logger.debug(f'Expanded URL: {entry.expanded_url}')
+                            print(f'Expanded URL: {entry.expanded_url}')
                             full_text = re.sub(entry.url, entry.expanded_url, full_text)
                         # if last character isn't new line, add it:
                         if full_text[-1] != '\n':
@@ -186,31 +200,48 @@ class Bot:
                         # inform about tests at this moment - to be removed later
                         full_text = '⚠️ Apenas um teste: ⚠️\n\n' + full_text
                         logger.debug(f"adding {msg.id} into queue for {account}")
-                        post_queue.put({
+                        while post_queue.full():
+                            print('queue is full on twitter side - waiting 1 s')
+                            await asyncio.sleep(1)
+                        post_queue.put_nowait({
                             "account": account,
                             "id": msg.id,
                             "text": full_text
                         })
                         logger.debug(f'queue size at twitter loop: {post_queue.qsize()}')
-            await asyncio.sleep(SLEEPTIME * 60)
+                        print(f'queue size at twitter loop: {post_queue.qsize()}')
+            # await asyncio.sleep(SLEEPTIME * 60)
+            timeout = SLEEPTIME * 60
+            while timeout > 0:
+                print('twitter waiting 1 s')
+                await asyncio.sleep(1)
+                timeout -= 1
             logger.debug('restarting twitter loop')
+            print('restarting twitter loop')
 
     async def loop_mastodon(self):
         # start delayed
-        await asyncio.sleep(10)
+        # await asyncio.sleep(10)
         while True:
             logger.debug("inside mastodon loop")
+            print("inside mastodon loop")
             logger.debug(f"mastodon queue size {post_queue.qsize()}")
-            if post_queue.qsize() > 0:
+            print(f"mastodon queue size {post_queue.qsize()}")
+            while post_queue.qsize():
                 logger.debug(f"queue size at mastodon loop: {post_queue.qsize()}")
-                while post_queue.qsize():
-                    obj = post_queue.get()
-                    logger.debug(f"queue data: {obj}")
-                    self.mst.status_post(status=obj["text"])
-                    self.db.updateLastID(obj["account"], obj["id"])
-                post_queue.task_done()
-            await asyncio.sleep(SLEEPTIME * 60)
+                print(f"queue size at mastodon loop: {post_queue.qsize()}")
+                obj = post_queue.get_nowait()
+                logger.debug(f"queue data: {obj}")
+                self.mst.status_post(status=obj["text"])
+                self.db.updateLastID(obj["account"], obj["id"])
+            # post_queue.task_done()
+            timeout = SLEEPTIME * 60
+            while timeout > 0:
+                print("mastodon waiting 1 s")
+                await asyncio.sleep(1)
+                timeout -= 1
             logger.debug('restarting mastodon loop')
+            print('restarting mastodon loop')
 
     async def simple_loop_twitter(self):
         logger.debug('Started simple loop twitter')
@@ -240,8 +271,8 @@ class Bot:
     async def mainloop(self):
         logger.info("starting mainloop - waiting for news")
         async with asyncio.TaskGroup() as tg:
-            task1 = tg.create_task(self.simple_loop_mastodon())
-            task2 = tg.create_task(self.simple_loop_twitter())
+            task1 = tg.create_task(self.loop_mastodon())
+            task2 = tg.create_task(self.loop_twitter())
         logger.info("ending processing messages")
 
     def urlDestination(self, url):

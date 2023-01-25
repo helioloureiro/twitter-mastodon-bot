@@ -16,7 +16,7 @@ import random
 
 post_queue = queue.Queue(10)
 DB_FILE = "twitter-mastodon-bot.db"
-SLEEPTIME = 0.5 # minutes
+SLEEPTIME = 5 # minutes
 
 logging.basicConfig()
 logging.root.setLevel(logging.INFO)
@@ -78,6 +78,32 @@ class MyTwitter:
         Simple warpper for GetUserTimeline.
         '''
         return self.api.GetUserTimeline(**kwargs)
+
+    def UnTwittefy(self, message):
+        '''
+        Replace @name by @name@twitter.com to match mastodon format.
+        '''
+        wordlist = []
+        for c in re.finditer('@', message):
+            char_start = c.span()[0]
+            # find where it ends
+            counter = 0
+            char_stop = 0
+            for w in message[char_start:]:
+                if re.match(' |\.|,|;|:', w):
+                    char_stop = char_start + counter
+                    break
+                counter += 1
+            if char_stop == 0:
+                # it reached the end of message and couldn't find it.
+                # so it is the total nr by counter
+                char_stop = char_start + counter
+            wordlist.append(message[char_start:char_stop])
+
+        for word in wordlist:
+            message = re.sub(word, f'{word}@twitter.com', message)
+        return message
+
 
 class MyMastodon:
     '''
@@ -184,6 +210,8 @@ class Bot:
                             full_text = msg.full_text
                         else:
                             full_text = msg.text
+                        # fix twitter references
+                        full_text = self.tw.UnTwittefy(full_text)
                         for entry in msg.urls:
                             logger.debug(f"Full URL entry: {entry}")
                             print(f"Full URL entry: {entry}")
@@ -201,8 +229,9 @@ class Bot:
                         full_text = '⚠️ Apenas um teste: ⚠️\n\n' + full_text
                         logger.debug(f"adding {msg.id} into queue for {account}")
                         while post_queue.full():
-                            print('queue is full on twitter side - waiting 1 s')
-                            await asyncio.sleep(1)
+                            sleeptime = random.randint(0, 60)
+                            print(f'queue is full on twitter side - waiting {sleeptime} s')
+                            await asyncio.sleep(sleeptime)
                         post_queue.put_nowait({
                             "account": account,
                             "id": msg.id,
@@ -210,18 +239,13 @@ class Bot:
                         })
                         logger.debug(f'queue size at twitter loop: {post_queue.qsize()}')
                         print(f'queue size at twitter loop: {post_queue.qsize()}')
-            # await asyncio.sleep(SLEEPTIME * 60)
-            timeout = SLEEPTIME * 60
-            while timeout > 0:
-                print('twitter waiting 1 s')
-                await asyncio.sleep(1)
-                timeout -= 1
+            await asyncio.sleep(SLEEPTIME * 60)
             logger.debug('restarting twitter loop')
             print('restarting twitter loop')
 
     async def loop_mastodon(self):
         # start delayed
-        # await asyncio.sleep(10)
+        await asyncio.sleep(10)
         while True:
             logger.debug("inside mastodon loop")
             print("inside mastodon loop")
@@ -232,14 +256,10 @@ class Bot:
                 print(f"queue size at mastodon loop: {post_queue.qsize()}")
                 obj = post_queue.get_nowait()
                 logger.debug(f"queue data: {obj}")
+                print(f"queue data: {obj}")
                 self.mst.status_post(status=obj["text"])
                 self.db.updateLastID(obj["account"], obj["id"])
-            # post_queue.task_done()
-            timeout = SLEEPTIME * 60
-            while timeout > 0:
-                print("mastodon waiting 1 s")
-                await asyncio.sleep(1)
-                timeout -= 1
+            await asyncio.sleep(SLEEPTIME * 60)
             logger.debug('restarting mastodon loop')
             print('restarting mastodon loop')
 

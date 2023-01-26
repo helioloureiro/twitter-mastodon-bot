@@ -177,35 +177,24 @@ class Bot:
     async def loop_twitter(self):
         while True:
             logger.debug("inside twitter loop")
-            print("inside twitter loop")
             logger.debug(f"twitter queue size {post_queue.qsize()}")
-            print(f"twitter queue size {post_queue.qsize()}")
             for account in  self.config['twitter-accounts']:
                     logger.debug(f'checking: {account}')
-                    print(f'checking: {account}')
                     resp = self.tw.GetUserTimeline(screen_name=account)
                     # logger.debug('raw:', resp)
                     logger.info(f"Found {len(resp)} new tweets for {account}")
-                    print(f"Found {len(resp)} new tweets for {account}")
                     for msg in resp:
                         logger.debug(f'twitter msg: {msg}')
-                        print(f'twitter msg: {msg}')
                         last_id = self.db.getLastID(account)
                         if last_id > msg.id:
                             logger.debug(f'{msg.id} already posted')
                             continue
                         logger.debug(f'ID: {msg.id}')
-                        print(f'ID: {msg.id}')
                         logger.debug(f'ScreenName: {msg.user}')
-                        print(f'ScreenName: {msg.user}')
                         logger.debug(f'Created: {msg.created_at}')
-                        print(f'Created: {msg.created_at}')
                         logger.debug(f'Text: {msg.text}')
-                        print(f'Text: {msg.text}')
                         logger.debug(f'Full Text: {msg.full_text}')
-                        print(f'Full Text: {msg.full_text}')
                         logger.debug(f'Media: {msg.media}')
-                        print(f'Media: {msg.media}')
                         if msg.full_text:
                             full_text = msg.full_text
                         else:
@@ -214,11 +203,8 @@ class Bot:
                         full_text = self.tw.UnTwittefy(full_text)
                         for entry in msg.urls:
                             logger.debug(f"Full URL entry: {entry}")
-                            print(f"Full URL entry: {entry}")
                             logger.debug(f'URL: {entry.url}')
-                            print(f'URL: {entry.url}')
                             logger.debug(f'Expanded URL: {entry.expanded_url}')
-                            print(f'Expanded URL: {entry.expanded_url}')
                             full_text = re.sub(entry.url, entry.expanded_url, full_text)
                         # if last character isn't new line, add it:
                         if full_text[-1] != '\n':
@@ -230,7 +216,7 @@ class Bot:
                         logger.debug(f"adding {msg.id} into queue for {account}")
                         while post_queue.full():
                             sleeptime = random.randint(0, 60)
-                            print(f'queue is full on twitter side - waiting {sleeptime} s')
+                            logger.debug(f'queue is full on twitter side - waiting {sleeptime} s')
                             await asyncio.sleep(sleeptime)
                         post_queue.put_nowait({
                             "account": account,
@@ -238,53 +224,41 @@ class Bot:
                             "text": full_text
                         })
                         logger.debug(f'queue size at twitter loop: {post_queue.qsize()}')
-                        print(f'queue size at twitter loop: {post_queue.qsize()}')
             await asyncio.sleep(SLEEPTIME * 60)
             logger.debug('restarting twitter loop')
-            print('restarting twitter loop')
 
     async def loop_mastodon(self):
         # start delayed
         await asyncio.sleep(10)
         while True:
             logger.debug("inside mastodon loop")
-            print("inside mastodon loop")
             logger.debug(f"mastodon queue size {post_queue.qsize()}")
-            print(f"mastodon queue size {post_queue.qsize()}")
             while post_queue.qsize():
                 logger.debug(f"queue size at mastodon loop: {post_queue.qsize()}")
-                print(f"queue size at mastodon loop: {post_queue.qsize()}")
                 obj = post_queue.get_nowait()
                 logger.debug(f"queue data: {obj}")
-                print(f"queue data: {obj}")
                 self.mst.status_post(status=obj["text"])
                 self.db.updateLastID(obj["account"], obj["id"])
             await asyncio.sleep(SLEEPTIME * 60)
             logger.debug('restarting mastodon loop')
-            print('restarting mastodon loop')
 
     async def simple_loop_twitter(self):
         logger.debug('Started simple loop twitter')
-        print('Started simple loop twitter')
         counter = 0
         await asyncio.sleep(10)
         while True:
             logger.debug(f'twitter queue size: {post_queue.qsize()}')
-            print(f'twitter queue size: {post_queue.qsize()}')
             post_queue.put_nowait({'size': counter})
             counter += 1
             await asyncio.sleep(random.randint(0,10))
 
     async def simple_loop_mastodon(self):
         logger.debug('Started simple loop mastodon')
-        print('Started simple loop mastodon')
         while True:
             logger.debug(f'mastodon queue size: {post_queue.qsize()}')
-            print(f'mastodon queue size: {post_queue.qsize()}')
             while post_queue.qsize() > 0:
                 data = post_queue.get_nowait()
                 logger.debug(f'* mastodon data got: {data}')
-                print(f'* mastodon data got: {data}')
             await asyncio.sleep(random.randint(0, 10))
         await asyncio.sleep(3)
 

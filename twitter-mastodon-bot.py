@@ -186,7 +186,7 @@ class Bot:
                     for msg in resp:
                         logger.debug(f'twitter msg: {msg}')
                         last_id = self.db.getLastID(account)
-                        if last_id > msg.id:
+                        if last_id >= msg.id:
                             logger.debug(f'{msg.id} already posted')
                             continue
                         logger.debug(f'ID: {msg.id}')
@@ -224,6 +224,8 @@ class Bot:
                             "text": full_text
                         })
                         logger.debug(f'queue size at twitter loop: {post_queue.qsize()}')
+                        # to give time to see messages in the debug log righ now - to disable it later
+                        await asyncio.sleep(30)
             await asyncio.sleep(SLEEPTIME * 60)
             logger.debug('restarting twitter loop')
 

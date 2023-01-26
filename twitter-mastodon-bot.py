@@ -90,7 +90,7 @@ class MyTwitter:
             counter = 0
             char_stop = 0
             for w in message[char_start:]:
-                if re.match(' |\.|,|;|:', w):
+                if re.match(' |\.|,|;|:|\)|\|\'|\"', w):
                     char_stop = char_start + counter
                     break
                 counter += 1
@@ -178,17 +178,22 @@ class Bot:
         while True:
             logger.debug("inside twitter loop")
             logger.debug(f"twitter queue size {post_queue.qsize()}")
+            # Note: the ids come in decreasing order, like FIFO order.
+            #       So better approach is to read all them in a dictionary
+            #       structure and order by id later to decide or not to publish.
+            twitter_content = {}
             for account in  self.config['twitter-accounts']:
                     logger.debug(f'checking: {account}')
-                    resp = self.tw.GetUserTimeline(screen_name=account)
+                    last_id = self.db.getLastID(account)
+                    if last_id == 0:
+                        resp = self.tw.GetUserTimeline(screen_name=account)
+                    else:
+                        resp = self.tw.GetUserTimeline(screen_name=account, since_id=last_id)
                     # logger.debug('raw:', resp)
                     logger.info(f"Found {len(resp)} new tweets for {account}")
                     for msg in resp:
                         logger.debug(f'twitter msg: {msg}')
-                        last_id = self.db.getLastID(account)
-                        if last_id >= msg.id:
-                            logger.debug(f'{msg.id} already posted')
-                            continue
+                        # do this last_id is needed here?
                         logger.debug(f'ID: {msg.id}')
                         logger.debug(f'ScreenName: {msg.user}')
                         logger.debug(f'Created: {msg.created_at}')
@@ -213,19 +218,30 @@ class Bot:
                         full_text += '\n'.join(self.config['hashtags'])
                         # inform about tests at this moment - to be removed later
                         full_text = '⚠️ Apenas um teste: ⚠️\n\n' + full_text
-                        logger.debug(f"adding {msg.id} into queue for {account}")
-                        while post_queue.full():
-                            sleeptime = random.randint(0, 60)
-                            logger.debug(f'queue is full on twitter side - waiting {sleeptime} s')
-                            await asyncio.sleep(sleeptime)
-                        post_queue.put_nowait({
-                            "account": account,
-                            "id": msg.id,
-                            "text": full_text
-                        })
-                        logger.debug(f'queue size at twitter loop: {post_queue.qsize()}')
-                        # to give time to see messages in the debug log righ now - to disable it later
-                        await asyncio.sleep(30)
+                        if not account in twitter_content:
+                            twitter_content[account] = {}
+                        twitter_content[account][msg.id] = full_text
+
+            # handling the messages here
+            for account in twitter_content.keys():
+                for msg_id in sorted(twitter_content[account].keys(), reverse=True):
+                    last_id = self.db.getLastID(account)
+                    if last_id > msg_id:
+                        logger.debug(f'message with id {msg_id} was already sent')
+                        continue
+                    while post_queue.full():
+                        naptime = random.randint(0, 60)
+                        logger.debug(f'queue is full on twitter side - waiting {sleeptime} s')
+                        await asyncio.sleep(naptime)
+                    post_queue.put({
+                        "account": account,
+                        "id": msg_id,
+                        "text" : twitter_content[account][msg_id]
+                    })
+                    logger.debug(f'queue size at twitter loop: {post_queue.qsize()}')
+                    # to give time to see messages in the debug log righ now - to disable it later
+                    await asyncio.sleep(30)
+
             await asyncio.sleep(SLEEPTIME * 60)
             logger.debug('restarting twitter loop')
 
@@ -237,8 +253,8 @@ class Bot:
             logger.debug(f"mastodon queue size {post_queue.qsize()}")
             while post_queue.qsize():
                 logger.debug(f"queue size at mastodon loop: {post_queue.qsize()}")
-                obj = post_queue.get_nowait()
-                logger.debug(f"queue data: {obj}")
+                obj = post_queue.get()
+                logger.debug(f"queue data at mastodon: {obj}")
                 self.mst.status_post(status=obj["text"])
                 self.db.updateLastID(obj["account"], obj["id"])
             await asyncio.sleep(SLEEPTIME * 60)

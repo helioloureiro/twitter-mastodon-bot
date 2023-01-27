@@ -29,10 +29,13 @@ def prettyJSON(some_dic):
     return json.dumps(some_dic, sort_keys=True, indent=4)
 
 def urlDestination(url):
+    logger.debug(f'url received: {url}')
     req = requests.get(url)
     if req.status_code != 200:
+        logger.debug(f'url got {req.status_code} - trying again')
         return urlDestination(req.url)
-    return url
+    logger.debug(f'url got 200 - continue and returning: {req.url}')
+    return req.url
 
 
 class DataBase:

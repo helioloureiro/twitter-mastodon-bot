@@ -28,6 +28,13 @@ logger.setLevel('INFO')
 def prettyJSON(some_dic):
     return json.dumps(some_dic, sort_keys=True, indent=4)
 
+def urlDestination(url):
+    req = requests.get(url)
+    if req.status_code != 200:
+        return urlDestination(req.url)
+    return url
+
+
 class DataBase:
     def __init__(self):
         self.dbconn = sqlite3.connect(DB_FILE)
@@ -90,7 +97,7 @@ class MyTwitter:
             counter = 0
             char_stop = 0
             for w in message[char_start:]:
-                if re.match(' |\.|,|;|:|\)|\|\'|\"', w):
+                if re.match(' |\.|,|;|:|\)|\|\'|\"|\n', w):
                     char_stop = char_start + counter
                     break
                 counter += 1
@@ -102,6 +109,36 @@ class MyTwitter:
 
         for word in wordlist:
             message = re.sub(word, f'{word}@twitter.com', message)
+        return message
+
+    def UnTCOfy(self, message):
+        '''
+        Replace all https://t.co references by full link.
+        '''
+        linklist = []
+        # note: this is a copy from UnTwittefy, so there is room for
+        #        refactoring
+        for c in re.finditer('https://t.co/', message):
+            char_start = c.span()[0]
+            header_size = len('https://t.co/')
+            counter = header_size
+            char_stop = 0
+            for w in message[char_start + header_size:]:
+                if re.match(' |\.|,|;|\)|\|\'|\"|\n', w):
+                    char_stop = char_start + counter
+                    break
+                counter += 1
+            if char_stop == header_size:
+                # it reached the end of message and couldn't find it.
+                # so it is the total nr by counter
+                char_stop = char_start + counter
+            if len(message[char_start:char_stop]) > header_size:
+                linklist.append(message[char_start:char_stop])
+
+
+        for link in linklist:
+            logger.debug(f'link: {link}')
+            message = re.sub(link, urlDestination(link) , message)
         return message
 
 
@@ -206,6 +243,7 @@ class Bot:
                             full_text = msg.text
                         # fix twitter references
                         full_text = self.tw.UnTwittefy(full_text)
+                        full_text = self.tw.UnTCOfy(full_text)
                         for entry in msg.urls:
                             logger.debug(f"Full URL entry: {entry}")
                             logger.debug(f'URL: {entry.url}')
@@ -286,12 +324,6 @@ class Bot:
             task1 = tg.create_task(self.loop_mastodon())
             task2 = tg.create_task(self.loop_twitter())
         logger.info("ending processing messages")
-
-    def urlDestination(self, url):
-        req = requests.get(url)
-        if req.status_code != 200:
-            return self.urlDestination(req.url)
-        return self.urlDestination(req.url)
 
 if __name__ == '__main__':
     bot = Bot()

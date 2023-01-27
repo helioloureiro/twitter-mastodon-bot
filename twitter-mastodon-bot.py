@@ -256,7 +256,7 @@ class Bot:
                         if full_text[-1] != '\n':
                             full_text += '\n'
                         # add hashtags
-                        full_text += '\n'.join(self.config['hashtags'])
+                        full_text += '\n\n'.join(self.config['hashtags'])
                         # inform about tests at this moment - to be removed later
                         full_text = '⚠️ Apenas um teste: ⚠️\n\n' + full_text
                         if not account in twitter_content:
@@ -289,6 +289,7 @@ class Bot:
     async def loop_mastodon(self):
         # start delayed
         await asyncio.sleep(10)
+        logger.info('starting mastodon queue monitoring')
         while True:
             logger.debug("inside mastodon loop")
             logger.debug(f"mastodon queue size {post_queue.qsize()}")
@@ -296,12 +297,16 @@ class Bot:
                 logger.debug(f"queue size at mastodon loop: {post_queue.qsize()}")
                 obj = post_queue.get()
                 logger.debug(f"queue data at mastodon: {obj}")
+                logger.info(f'posting account={obj["account"]}, msg_id={obj["id"]}')
                 self.mst.status_post(status=obj["text"])
                 self.db.updateLastID(obj["account"], obj["id"])
             await asyncio.sleep(SLEEPTIME * 60)
             logger.debug('restarting mastodon loop')
 
     async def simple_loop_twitter(self):
+        '''
+        Just simple asyncio loop to fix queues, etc for twitter.
+        '''
         logger.debug('Started simple loop twitter')
         counter = 0
         await asyncio.sleep(10)
@@ -312,6 +317,9 @@ class Bot:
             await asyncio.sleep(random.randint(0,10))
 
     async def simple_loop_mastodon(self):
+        '''
+        Just simple asyncio loop to fix queues, etc for mastodon.
+        '''
         logger.debug('Started simple loop mastodon')
         while True:
             logger.debug(f'mastodon queue size: {post_queue.qsize()}')

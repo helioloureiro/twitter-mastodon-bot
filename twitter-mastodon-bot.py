@@ -79,7 +79,8 @@ class MyTwitter:
             consumer_secret = config['twitter-conssec'],
             access_token_key = config['twitter-acctkkey'],
             access_token_secret = config['twitter-acctksec'],
-            tweet_mode = "extended"
+            tweet_mode = "extended",
+            sleep_on_rate_limit = True
         )
         logger.info('Authenticated at twitter.')
 
@@ -222,13 +223,20 @@ class Bot:
             #       So better approach is to read all them in a dictionary
             #       structure and order by id later to decide or not to publish.
             twitter_content = {}
+
             for account in  self.config['twitter-accounts']:
                     logger.debug(f'checking: {account}')
                     last_id = self.db.getLastID(account)
-                    if last_id == 0:
-                        resp = self.tw.GetUserTimeline(screen_name=account)
-                    else:
-                        resp = self.tw.GetUserTimeline(screen_name=account, since_id=last_id)
+                    try:
+                        if last_id == 0:
+                            resp = self.tw.GetUserTimeline(screen_name=account)
+                        else:
+                            resp = self.tw.GetUserTimeline(screen_name=account, since_id=last_id)
+                    except twitter.error.TwitterError:
+                        naptime = random.randrange(1,10)
+                        logger.warning(f'twitter reached limit - sleeping to try again in {naptime} minutes')
+                        await asyncio.sleep( naptime * 60)
+                        continue
                     # logger.debug('raw:', resp)
                     logger.info(f"Found {len(resp)} new tweets for {account}")
                     for msg in resp:
